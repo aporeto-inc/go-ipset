@@ -29,7 +29,10 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-const minIpsetVersion = "6.0.0"
+const (
+	minIpsetVersion = "6.0.0"
+	AllSets = ""
+)
 
 var (
 	ipsetPath            string
@@ -220,13 +223,7 @@ func (s *IPSet) Flush() error {
 
 // List is used to show the contents of a set
 func (s *IPSet) List() ([]string, error) {
-	out, err := exec.Command(ipsetPath, "list", s.Name).CombinedOutput()
-	if err != nil {
-		return []string{}, fmt.Errorf("error listing set %s: %v (%s)", s.Name, err, out)
-	}
-	r := regexp.MustCompile("(?m)^(.*\n)*Members:\n")
-	list := r.ReplaceAllString(string(out[:]), "")
-	return strings.Split(list, "\n"), nil
+	return list(s.Name)
 }
 
 // Destroy is used to destroy the set.
@@ -239,11 +236,27 @@ func (s *IPSet) Destroy() error {
 }
 
 // DestroyAll is used to destroy the set.
-func DestroyAll() error {
+// The prefix may be a prefix string or the constant ipset.AllSets
+// to specify all all sets should be destroyed
+func DestroyAll(prefix string) error {
+
 	initCheck()
-	out, err := exec.Command(ipsetPath, "destroy").CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("error destroying set %s (%s)", err, out)
+	
+	if prefix == AllSets {
+		return destroyIPSet(AllSets)
+	}
+	
+	var ips []string
+	var err error
+	if ips, err = list(AllSets); err != nil {
+		return err
+	}
+	for _, name := range (ips) {
+		if strings.HasPrefix(name, prefix) {
+			if err := destroyIPSet(name); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -265,12 +278,14 @@ func destroyIPSet(name string) error {
 	return nil
 }
 
-func destroyAll() error {
-	out, err := exec.Command(ipsetPath, "destroy").Output()
+func list(set string) ([]string, error) {
+	out, err := exec.Command(ipsetPath, "list", set).CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("error destroying all ipsetz %s (%s)", err, out)
+		return []string{}, fmt.Errorf("error listing set %s: %v (%s)", set, err, out)
 	}
-	return nil
+	r := regexp.MustCompile("(?m)^(.*\n)*Members:\n")
+	newlist := r.ReplaceAllString(string(out[:]), "")
+	return strings.Split(newlist, "\n"), nil
 }
 
 func getIpsetSupportedVersion() (bool, error) {

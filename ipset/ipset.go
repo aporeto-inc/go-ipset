@@ -31,7 +31,7 @@ import (
 
 const (
 	minIpsetVersion = "6.0.0"
-	AllSets = ""
+	AllSets         = ""
 )
 
 var (
@@ -237,25 +237,51 @@ func (s *IPSet) Destroy() error {
 
 // DestroyAll is used to destroy the set.
 // The prefix may be a prefix string or the constant ipset.AllSets
-// to specify all all sets should be destroyed
-func DestroyAll(prefix string) error {
+// to specify that all existing sets should be destroyed
+// Note that attempting to destroy a set that is in use will
+// result in an error being returned.
+//
+// I use the variadic form here to preserve the original API with no arguments.
+// i.e. DestroyAll() with no arguments will still work.
+//
+// DestroyAll("") and DestroyAll(ipset.AllSets) are equivalent to DestroyAll()
+//
+// DestroyAll("prefix") is new functionality
+// Note that the variadic allows for DestroyAll("prefix1", "prefix2")
+// but all arguments after prefix1 are currently ignored
+//
+func DestroyAll(prefix ...string) error {
 
 	initCheck()
-	
-	if prefix == AllSets {
-		return destroyIPSet(AllSets)
+
+	var searchPrefix string
+
+	if len(prefix) == 0 {
+		searchPrefix = AllSets
+	} else {
+		searchPrefix = prefix[0] // might be AllSets
 	}
-	
-	var ips []string
-	var err error
-	if ips, err = list(AllSets); err != nil {
+
+	if ips, err := listAllSetNames(); err != nil {
 		return err
-	}
-	for _, name := range (ips) {
-		if strings.HasPrefix(name, prefix) {
-			if err := destroyIPSet(name); err != nil {
-				return err
+	} else {
+		var errs strings.Builder
+		for _, name := range ips {
+			if strings.HasPrefix(name, searchPrefix) { // AllSets always matches :)
+				if err = destroyIPSet(name); err != nil {
+					errs.WriteString(fmt.Sprintf("ipset(%s): %s\n", name, err.Error()))
+				}
 			}
+		}
+		if len(errs.String()) != 0 { // if errors occured above
+			prefixMsg := func() string {
+				if searchPrefix == AllSets {
+					return "all"
+				} else {
+					return "prefix"
+				}
+			}
+			return fmt.Errorf("error destroying %s sets %s (%s)", prefixMsg(), searchPrefix, errs.String())
 		}
 	}
 	return nil
@@ -271,8 +297,8 @@ func Swap(from, to string) error {
 }
 
 func destroyIPSet(name string) error {
-	out, err := exec.Command(ipsetPath, "destroy", name).Output()
-	if err != nil {
+	out, err := exec.Command(ipsetPath, "destroy", name).CombinedOutput()
+	if err != nil && !strings.Contains(string(out), "does not exist") {
 		return fmt.Errorf("error destroying ipset %s: %v (%s)", name, err, out)
 	}
 	return nil
@@ -285,7 +311,7 @@ func list(set string) ([]string, error) {
 	}
 	r := regexp.MustCompile("(?m)^(.*\n)*Members:\n")
 	newlist := r.ReplaceAllString(string(out[:]), "")
-	return strings.Split(newlist, "\n"), nil
+	return strings.FieldsFunc(newlist, fieldsFunc), nil
 }
 
 func getIpsetSupportedVersion() (bool, error) {
@@ -322,4 +348,19 @@ func getIpsetVersionString() (string, error) {
 		return "", fmt.Errorf("no ipset version found in string: %s", bytes)
 	}
 	return match[0], nil
+}
+
+func listAllSetNames() ([]string, error) {
+	out, err := exec.Command(ipsetPath, "list", "-n").CombinedOutput()
+	if err != nil {
+		return []string{}, fmt.Errorf("error listing all sets: %v (%s)", err, out)
+	}
+	return strings.FieldsFunc(string(out), fieldsFunc), nil
+}
+
+// use a fields function for strings.FieldsFunc() to skip all newlines and returns and thus
+// eliminate the "" empty strings normally returned from strings.Split()
+// on empty, blank lines or space filled field values
+func fieldsFunc(c rune) bool {
+	return c == '\n' || c == '\r' || c == ' ' || c == '\t'
 }

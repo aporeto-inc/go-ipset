@@ -289,7 +289,7 @@ func DestroyAll(prefix ...string) error {
 
 // Swap is used to hot swap two sets on-the-fly. Use with names of existing sets of the same type.
 func Swap(from, to string) error {
-	out, err := exec.Command(ipsetPath, "swap", from, to).Output()
+	out, err := exec.Command(ipsetPath, "swap", from, to).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("error swapping ipset %s to %s: %v (%s)", from, to, err, out)
 	}

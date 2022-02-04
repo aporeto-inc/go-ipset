@@ -20,6 +20,8 @@ package ipset
 import (
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -75,7 +77,6 @@ func initCheck(name ...string) error {
 		ipsetPath = path
 		supportedVersion, err := getIpsetSupportedVersion()
 		if err != nil {
-			log.Warnf("Error checking ipset version, assuming version at least 6.0.0: %v", err)
 			supportedVersion = true
 		}
 		if supportedVersion {
@@ -335,17 +336,35 @@ func getIpsetSupportedVersion() (bool, error) {
 	return true, nil
 }
 
+var execCommand = exec.Command
+
 func getIpsetVersionString() (string, error) {
-	bytes, err := exec.Command(ipsetPath, "--version").CombinedOutput()
+
+	// ipset --version can run successfully and print the version string,
+	// but it will exit code 1.
+	// when it does this, the err is *os.ExitError.
+	// If the ipset file is not found, the error is *os.PathError
+	bytes, err := execCommand(ipsetPath, "--version").CombinedOutput()
 	if err != nil {
-		return "", err
+		fmt.Printf("%s (%T)\n", err, err)
+		if _, ok := err.(*os.PathError); ok {
+			return "", err
+		}
+		if _, ok := err.(*fs.PathError); ok {
+			return "", err
+		}
 	}
-	versionMatcher := regexp.MustCompile("v[0-9]+\\.[0-9]+")
-	match := versionMatcher.FindStringSubmatch(string(bytes))
-	if match == nil {
-		return "", fmt.Errorf("no ipset version found in string: %s", bytes)
+
+	// if we got some data from CombinedOutput(), then check for the version string.
+	if len(bytes) > 0 {
+		versionMatcher := regexp.MustCompile("v[0-9]+\\.[0-9]+")
+		match := versionMatcher.FindStringSubmatch(string(bytes))
+		if match == nil {
+			return "", fmt.Errorf("no ipset version found in string: %s", bytes)
+		}
+		return match[0], nil
 	}
-	return match[0], nil
+	return "", err
 }
 
 func listAllSetNames() ([]string, error) {

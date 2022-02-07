@@ -346,7 +346,6 @@ func getIpsetVersionString() (string, error) {
 	// If the ipset file is not found, the error is *os.PathError
 	bytes, err := execCommand(ipsetPath, "--version").CombinedOutput()
 	if err != nil {
-		fmt.Printf("%s (%T)\n", err, err)
 		if _, ok := err.(*os.PathError); ok {
 			return "", err
 		}
